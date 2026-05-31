@@ -20,8 +20,8 @@ interface Summary {
   qtdGastos: number;
 }
 
-const CATEGORIAS_RECEITA = ['Geladinho', 'Bolo de Pote', 'Combo', 'Outros'];
-const CATEGORIAS_GASTO = ['Ingredientes', 'Embalagens', 'Gás/Energia', 'Transporte', 'Outros'];
+const CATEGORIAS_RECEITA = ['Total do Dia', 'Geladinho', 'Bolo de Pote', 'Combo', 'Outros'];
+const CATEGORIAS_GASTO = ['Total do Dia', 'Ingredientes', 'Embalagens', 'Gás/Energia', 'Transporte', 'Outros'];
 
 const fmt = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -48,7 +48,7 @@ export default function Home() {
   const [form, setForm] = useState({
     date: today(),
     type: 'receita' as 'receita' | 'gasto',
-    category: 'Geladinho',
+    category: 'Total do Dia',
     description: '',
     amount: '',
   });
@@ -325,7 +325,7 @@ export default function Home() {
 
               {/* Tipo toggle */}
               <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-                <button onClick={() => setForm(f => ({ ...f, type: 'receita', category: 'Geladinho' }))}
+                <button onClick={() => setForm(f => ({ ...f, type: 'receita', category: 'Total do Dia' }))}
                   style={{
                     flex: 1, padding: '18px', borderRadius: 'var(--radius)', fontSize: 16, fontWeight: 700,
                     background: form.type === 'receita' ? 'linear-gradient(135deg, #4CAF7D, #2E7D52)' : 'var(--branco)',
@@ -335,7 +335,7 @@ export default function Home() {
                   }}>
                   💰 Receita de Venda
                 </button>
-                <button onClick={() => setForm(f => ({ ...f, type: 'gasto', category: 'Ingredientes' }))}
+                <button onClick={() => setForm(f => ({ ...f, type: 'gasto', category: 'Total do Dia' }))}
                   style={{
                     flex: 1, padding: '18px', borderRadius: 'var(--radius)', fontSize: 16, fontWeight: 700,
                     background: form.type === 'gasto' ? 'linear-gradient(135deg, #E53935, #B71C1C)' : 'var(--branco)',
@@ -392,9 +392,11 @@ export default function Home() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
                   {[
+                    { emoji: '📊', label: 'Total do Dia', type: 'receita' as const, cat: 'Total do Dia' },
                     { emoji: '🍡', label: 'Geladinho', type: 'receita' as const, cat: 'Geladinho' },
                     { emoji: '🍫', label: 'Bolo de Pote', type: 'receita' as const, cat: 'Bolo de Pote' },
                     { emoji: '🎁', label: 'Combo', type: 'receita' as const, cat: 'Combo' },
+                    { emoji: '🛒', label: 'Total Gastos', type: 'gasto' as const, cat: 'Total do Dia' },
                     { emoji: '🥛', label: 'Ingredientes', type: 'gasto' as const, cat: 'Ingredientes' },
                     { emoji: '📦', label: 'Embalagens', type: 'gasto' as const, cat: 'Embalagens' },
                     { emoji: '🔥', label: 'Gás/Energia', type: 'gasto' as const, cat: 'Gás/Energia' },
