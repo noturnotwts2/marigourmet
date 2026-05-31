@@ -1,13 +1,12 @@
-import fs from 'fs';
-import path from 'path';
-import { parse } from 'csv-parse/sync';
-import { stringify } from 'csv-stringify/sync';
+import { neon } from '@neondatabase/serverless';
+
+const sql = neon(process.env.DATABASE_URL!);
 
 export type EntryType = 'receita' | 'gasto';
 
 export interface Entry {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   type: EntryType;
   category: string;
   description: string;
@@ -15,84 +14,67 @@ export interface Entry {
   createdAt: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const CSV_PATH = path.join(DATA_DIR, 'entries.csv');
-
-const HEADERS = ['id', 'date', 'type', 'category', 'description', 'amount', 'createdAt'];
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(CSV_PATH)) {
-    fs.writeFileSync(CSV_PATH, HEADERS.join(',') + '\n', 'utf-8');
-  }
+export async function initDB() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS entries (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      amount NUMERIC NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
 }
 
-export function readEntries(): Entry[] {
-  ensureDataDir();
-  const content = fs.readFileSync(CSV_PATH, 'utf-8');
-  if (!content.trim() || content.trim() === HEADERS.join(',')) return [];
-  
-  try {
-    const records = parse(content, {
-      columns: true,
-      skip_empty_lines: true,
-      cast: (value, context) => {
-        if (context.column === 'amount') return parseFloat(value) || 0;
-        return value;
-      },
-    });
-    return records as Entry[];
-  } catch {
-    return [];
-  }
+export async function readEntries(): Promise<Entry[]> {
+  await initDB();
+  const rows = await sql`SELECT * FROM entries ORDER BY date DESC, created_at DESC`;
+  return rows.map(r => ({
+    id: r.id, date: r.date, type: r.type as EntryType,
+    category: r.category, description: r.description || '',
+    amount: parseFloat(r.amount), createdAt: r.created_at,
+  }));
 }
 
-export function writeEntries(entries: Entry[]) {
-  ensureDataDir();
-  const output = stringify(entries, { header: true, columns: HEADERS });
-  fs.writeFileSync(CSV_PATH, output, 'utf-8');
+export async function addEntry(entry: Omit<Entry, 'id' | 'createdAt'>): Promise<Entry> {
+  await initDB();
+  const id = Date.now().toString();
+  await sql`
+    INSERT INTO entries (id, date, type, category, description, amount)
+    VALUES (${id}, ${entry.date}, ${entry.type}, ${entry.category}, ${entry.description}, ${entry.amount})
+  `;
+  return { ...entry, id, createdAt: new Date().toISOString() };
 }
 
-export function addEntry(entry: Omit<Entry, 'id' | 'createdAt'>): Entry {
-  const entries = readEntries();
-  const newEntry: Entry = {
-    ...entry,
-    id: Date.now().toString(),
-    createdAt: new Date().toISOString(),
-  };
-  entries.push(newEntry);
-  writeEntries(entries);
-  return newEntry;
+export async function deleteEntry(id: string): Promise<boolean> {
+  await initDB();
+  const result = await sql`DELETE FROM entries WHERE id = ${id} RETURNING id`;
+  return result.length > 0;
 }
 
-export function deleteEntry(id: string): boolean {
-  const entries = readEntries();
-  const filtered = entries.filter(e => e.id !== id);
-  if (filtered.length === entries.length) return false;
-  writeEntries(filtered);
-  return true;
-}
-
-export function getEntriesByDateRange(days: number): Entry[] {
-  const entries = readEntries();
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
-  return entries.filter(e => e.date >= cutoffStr);
+export async function getEntriesByDateRange(days: number): Promise<Entry[]> {
+  await initDB();
+  const rows = await sql`
+    SELECT * FROM entries
+    WHERE date::date >= CURRENT_DATE - (${days} || ' days')::INTERVAL
+    ORDER BY date DESC, created_at DESC
+  `;
+  return rows.map(r => ({
+    id: r.id, date: r.date, type: r.type as EntryType,
+    category: r.category, description: r.description || '',
+    amount: parseFloat(r.amount), createdAt: r.created_at,
+  }));
 }
 
 export function getSummary(entries: Entry[]) {
   const receitas = entries.filter(e => e.type === 'receita');
   const gastos = entries.filter(e => e.type === 'gasto');
-  
-  const totalReceitas = receitas.reduce((sum, e) => sum + e.amount, 0);
-  const totalGastos = gastos.reduce((sum, e) => sum + e.amount, 0);
-  
+  const totalReceitas = receitas.reduce((s, e) => s + e.amount, 0);
+  const totalGastos = gastos.reduce((s, e) => s + e.amount, 0);
   return {
-    totalReceitas,
-    totalGastos,
+    totalReceitas, totalGastos,
     lucroLiquido: totalReceitas - totalGastos,
     qtdReceitas: receitas.length,
     qtdGastos: gastos.length,
@@ -101,18 +83,11 @@ export function getSummary(entries: Entry[]) {
 
 export function getByDay(entries: Entry[]): Record<string, { receitas: number; gastos: number; lucro: number }> {
   const byDay: Record<string, { receitas: number; gastos: number; lucro: number }> = {};
-  
-  for (const entry of entries) {
-    if (!byDay[entry.date]) {
-      byDay[entry.date] = { receitas: 0, gastos: 0, lucro: 0 };
-    }
-    if (entry.type === 'receita') {
-      byDay[entry.date].receitas += entry.amount;
-    } else {
-      byDay[entry.date].gastos += entry.amount;
-    }
-    byDay[entry.date].lucro = byDay[entry.date].receitas - byDay[entry.date].gastos;
+  for (const e of entries) {
+    if (!byDay[e.date]) byDay[e.date] = { receitas: 0, gastos: 0, lucro: 0 };
+    if (e.type === 'receita') byDay[e.date].receitas += e.amount;
+    else byDay[e.date].gastos += e.amount;
+    byDay[e.date].lucro = byDay[e.date].receitas - byDay[e.date].gastos;
   }
-  
   return byDay;
 }
